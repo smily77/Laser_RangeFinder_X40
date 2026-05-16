@@ -1,0 +1,34 @@
+# Syntax colouring for Arduino IDE
+
+# Class name
+X40LaserDistanceMeter	KEYWORD1
+X40Measurement	KEYWORD1
+X40Status	KEYWORD1
+
+# Methods
+begin	KEYWORD2
+setTimeout	KEYWORD2
+setIdleGap	KEYWORD2
+singleMeasurement	KEYWORD2
+startContinuousMeasurement	KEYWORD2
+readContinuousDistance	KEYWORD2
+stopContinuousMeasurement	KEYWORD2
+takeSingleMeasurementToCache	KEYWORD2
+readCache	KEYWORD2
+controlLaser	KEYWORD2
+shutDown	KEYWORD2
+readMachineNumber	KEYWORD2
+readStatus	KEYWORD2
+readVersion	KEYWORD2
+measure	KEYWORD2
+measurePrecise	KEYWORD2
+measureFast	KEYWORD2
+readRangeMillimeters	KEYWORD2
+readRangeMeters	KEYWORD2
+lastStatus	KEYWORD2
+lastErrorCode	KEYWORD2
+lastRawResponse	KEYWORD2
+
+# Constants
+X40_LASER_ON	LITERAL1
+X40_LASER_OFF	LITERAL1
