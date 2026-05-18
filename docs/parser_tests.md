@@ -14,9 +14,11 @@ Run them mentally or port to a host-side unit test.
 | `0.010m,0200` | true  | 0.010  | 10          | 200           | -1        | OK          |
 | `12.345M,0079`| true  | 12.345 | 12345       | 79            | -1        | OK (uppercase M) |
 | `12.345m`     | true  | 12.345 | 12345       | -1            | -1        | OK (no SQ)  |
-| `Er.01!`      | false | NAN    | 0           | -1            | 1         | DeviceError |
+| `:Er08!`      | false | NAN    | 0           | -1            | 8         | DeviceError (observed format: colon prefix, no dot) |
+| `Er.01!`      | false | NAN    | 0           | -1            | 1         | DeviceError (PDF format with dot) |
 | `Er.XX!`      | false | NAN    | 0           | -1            | -1        | DeviceError (non-numeric code) |
 | `Er.12`       | false | NAN    | 0           | -1            | 12        | DeviceError |
+| `D12.345m,0079`| true | 12.345 | 12345       | 79            | -1        | OK (echo prefix 'D' before distance) |
 | `` (empty)    | false | NAN    | 0           | -1            | -1        | Timeout     |
 | `hello world` | false | NAN    | 0           | -1            | -1        | ParseError  |
 

@@ -50,8 +50,10 @@ String X40LaserDistanceMeter::readResponse() {
                 return s;
             }
         }
-        // Idle-gap: no new bytes for _idleGap ms after first byte arrived
-        if (got && (millis() - lastByte) >= _idleGap) break;
+        // Idle-gap: no new bytes for _idleGap ms — but only if we have more than
+        // 1 byte already. A single byte is likely the command echo; don't exit early
+        // before the actual response (which arrives after the module's processing delay).
+        if (got && s.length() > 1 && (millis() - lastByte) >= _idleGap) break;
         delay(1);
     }
     s.trim();
@@ -80,20 +82,25 @@ X40Measurement X40LaserDistanceMeter::parseDistance(const String& raw) {
         return result;
     }
 
-    // Check for device error "Er.XX" or "Er.XX!"
-    int erPos = raw.indexOf("Er.");
+    // Check for device error.
+    // Observed format: ":Er08!"  (colon prefix, no dot between Er and code)
+    // PDF-documented:  "Er.XX!"  (dot separator)
+    // Both variants are handled: look for "Er" and optionally skip a following dot.
+    int erPos = raw.indexOf("Er");
     if (erPos >= 0) {
         _lastStatus = DeviceError;
         String codeStr;
-        int i = erPos + 3;
+        int i = erPos + 2;
+        if (i < (int)raw.length() && raw[i] == '.') i++; // skip optional dot (PDF format)
         while (i < (int)raw.length() && (isDigit(raw[i]) || isUpperCase(raw[i]))) {
             codeStr += raw[i++];
         }
-        bool allDigits = true;
+        // Only map to int when the code consists purely of digits (e.g. "08" → 8)
+        bool allDigits = (codeStr.length() > 0);
         for (int j = 0; j < (int)codeStr.length(); j++) {
             if (!isDigit(codeStr[j])) { allDigits = false; break; }
         }
-        result.errorCode = (allDigits && codeStr.length() > 0) ? codeStr.toInt() : -1;
+        result.errorCode = allDigits ? codeStr.toInt() : -1;
         _lastErrorCode = result.errorCode;
         return result;
     }
