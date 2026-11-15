@@ -1,9 +1,0 @@
-{
-  "additionalFiles": "",
-  "compiler.optimization_flags": "-Os",
-  "customBuildProperties": "",
-  "fqbn": "esp32:esp32:esp32",
-  "hardwareFolders": "C:\\Users\\stefan\\AppData\\Local\\Arduino15\\packages\\esp32\\hardware\\esp32\\3.3.10,C:\\Users\\stefan\\AppData\\Local\\Arduino15\\packages\\esp32\\hardware\\esp32\\3.3.10",
-  "otherLibrariesFolders": "C:\\Users\\stefan\\Documents\\Arduino\\libraries",
-  "sketchLocation": "C:\\Users\\stefan\\Documents\\Arduino\\libraries\\Laser_RangeFinder_X40\\extras\\X40_TurretTest"
-}
