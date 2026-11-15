@@ -4,7 +4,8 @@
 X40LaserDistanceMeter::X40LaserDistanceMeter(HardwareSerial* serial)
     : _serial(serial),
       _timeout(4000),
-      _idleGap(40),
+      _idleGap(60),
+      _maxRangeM(X40_DEFAULT_MAX_RANGE_M),
       _lastStatus(OK),
       _lastErrorCode(-1),
       _cachedDistance(NAN),
@@ -16,13 +17,16 @@ void X40LaserDistanceMeter::begin(uint32_t baudRate) {
     delay(100);
 }
 
+#if defined(ESP32)
 void X40LaserDistanceMeter::begin(uint32_t baudRate, int rxPin, int txPin) {
     _serial->begin(baudRate, SERIAL_8N1, rxPin, txPin);
     delay(100);
 }
+#endif
 
 void X40LaserDistanceMeter::setTimeout(uint32_t ms) { _timeout = ms; }
 void X40LaserDistanceMeter::setIdleGap(uint32_t ms) { _idleGap = ms; }
+void X40LaserDistanceMeter::setMaxRange(float meters) { _maxRangeM = meters; }
 
 // ---- Internal communication ----
 
@@ -66,6 +70,64 @@ String X40LaserDistanceMeter::sendCommand(char cmd) {
     return readResponse();
 }
 
+// Position of the distance unit: an 'm'/'M' directly preceded by a digit.
+// A bare 'M' (echo of the M command) or other letters are ignored.
+static int findUnitPos(const String& s) {
+    for (int i = 1; i < (int)s.length(); i++) {
+        if ((s[i] == 'm' || s[i] == 'M') && isDigit(s[i - 1])) return i;
+    }
+    return -1;
+}
+
+// True when s already contains a complete-looking distance or a device error.
+static bool hasDistanceOrError(const String& s) {
+    return findUnitPos(s) >= 0 || s.indexOf("Er") >= 0;
+}
+
+// The X40 answers a measurement command in two parts: first the echo of the
+// command letter (e.g. "D", possibly with its own line ending), then ~1 s later
+// the result ": 6.286m,1923" + line ending. readResponse() would stop after the
+// echo, so measurements use this reader: it keeps reading across line endings
+// until a distance (digit + 'm') or "Er" has arrived, then stops at the next
+// line ending or after _idleGap ms of silence. Overall limit is _timeout.
+String X40LaserDistanceMeter::readMeasurementResponse() {
+    String s;
+    s.reserve(32);
+    uint32_t t0 = millis();
+    uint32_t lastByte = 0;
+    bool got = false;
+
+    while (millis() - t0 < _timeout) {
+        while (_serial->available()) {
+            char c = (char)_serial->read();
+            got = true;
+            lastByte = millis();
+            if (c == '\r' || c == '\n') {
+                if (hasDistanceOrError(s)) {
+                    s.trim();
+                    return s;
+                }
+                // Line ending after the echo: keep parts apart, keep waiting
+                if (s.length() > 0 && s[s.length() - 1] != ' ') s += ' ';
+                continue;
+            }
+            if (c >= 32) s += c;
+        }
+        if (got && hasDistanceOrError(s) && (millis() - lastByte) >= _idleGap) break;
+        delay(1);
+    }
+    s.trim();
+    return s;
+}
+
+X40Measurement X40LaserDistanceMeter::runMeasurement(char cmd) {
+    flushInput();
+    _serial->write((uint8_t)cmd);
+    String raw = readMeasurementResponse();
+    _lastRaw = raw;
+    return parseDistance(raw);
+}
+
 // ---- Parsers ----
 
 X40Measurement X40LaserDistanceMeter::parseDistance(const String& raw) {
@@ -105,9 +167,8 @@ X40Measurement X40LaserDistanceMeter::parseDistance(const String& raw) {
         return result;
     }
 
-    // Find unit marker 'm' or 'M'
-    int mpos = raw.indexOf('m');
-    if (mpos < 0) mpos = raw.indexOf('M');
+    // Find unit marker: 'm' or 'M' directly after a digit (skips a command echo "M")
+    int mpos = findUnitPos(raw);
     if (mpos < 0) {
         _lastStatus = ParseError;
         return result;
@@ -140,9 +201,16 @@ X40Measurement X40LaserDistanceMeter::parseDistance(const String& raw) {
         }
     }
 
+    _lastErrorCode = -1;
+
+    // Optional plausibility limit (off by default, see setMaxRange()).
+    if (_maxRangeM > 0.0f && result.meters > _maxRangeM) {
+        _lastStatus = OutOfRange;   // meters/millimeters stay filled for diagnostics
+        return result;
+    }
+
     result.ok = true;
     _lastStatus = OK;
-    _lastErrorCode = -1;
     return result;
 }
 
@@ -237,8 +305,8 @@ bool X40LaserDistanceMeter::shutDown() {
 bool X40LaserDistanceMeter::readMachineNumber(char* buffer) {
     String raw = sendCommand('V');
     _lastRaw = raw;
-    if (raw.length() == 0) {
-        _lastStatus = Timeout;
+    if (raw.length() <= 1) {        // nothing, or only the command echo "V"
+        _lastStatus = raw.length() ? Unsupported : Timeout;
         if (buffer) buffer[0] = '\0';
         return false;
     }
@@ -272,20 +340,19 @@ bool X40LaserDistanceMeter::readStatus(float* temperatureC, float* supplyV) {
 
     float temp = NAN, volt = NAN;
 
-    // Temperature: first float before 'C' — handles "18.0C" and "18.0'C"
+    // Temperature: number before 'C'. Up to 3 degree-like characters between
+    // number and 'C' are skipped: "18.0C", "18.0'C", "24.8`C" (observed), "18.0°C"
     int cpos = raw.indexOf('C');
     if (cpos > 0) {
-        int start = cpos;
+        int end = cpos;
+        for (int k = 0; k < 3 && end > 0 && !isDigit(raw[end - 1]) && raw[end - 1] != ','; k++) end--;
+        int start = end;
         while (start > 0) {
             char c = raw[start - 1];
-            if (isDigit(c) || c == '.' || c == '-' || c == '\'' || c == ' ') start--;
+            if (isDigit(c) || c == '.' || c == '-') start--;
             else break;
         }
-        String tStr = raw.substring(start, cpos);
-        tStr.trim();
-        tStr.replace("'", "");
-        tStr.trim();
-        if (tStr.length() > 0) temp = tStr.toFloat();
+        if (start < end && isDigit(raw[end - 1])) temp = raw.substring(start, end).toFloat();
     }
 
     // Voltage: first float before 'V'
@@ -319,31 +386,33 @@ bool X40LaserDistanceMeter::readVersion(String* versionText) {
         _lastStatus = Timeout;
         return false;
     }
+    if (raw.length() <= 1) {        // only the command echo "V": not supported
+        _lastStatus = Unsupported;
+        return false;
+    }
     if (versionText) *versionText = raw;
     _lastStatus = OK;
     return true;
 }
 
 X40Measurement X40LaserDistanceMeter::measure() {
-    String raw = sendCommand('D');
-    _lastRaw = raw;
-    return parseDistance(raw);
+    return runMeasurement('D');
 }
 
 X40Measurement X40LaserDistanceMeter::measurePrecise() {
-    String raw = sendCommand('M');
-    _lastRaw = raw;
-    X40Measurement m = parseDistance(raw);
-    // A timeout on an optional command means it's likely unsupported
-    if (!m.ok && _lastStatus == Timeout) _lastStatus = Unsupported;
+    X40Measurement m = runMeasurement('M');
+    // No answer (or only the echo) on an optional command: likely unsupported
+    if (!m.ok && (_lastStatus == Timeout ||
+                  (_lastStatus == ParseError && m.raw.length() <= 1)))
+        _lastStatus = Unsupported;
     return m;
 }
 
 X40Measurement X40LaserDistanceMeter::measureFast() {
-    String raw = sendCommand('F');
-    _lastRaw = raw;
-    X40Measurement m = parseDistance(raw);
-    if (!m.ok && _lastStatus == Timeout) _lastStatus = Unsupported;
+    X40Measurement m = runMeasurement('F');
+    if (!m.ok && (_lastStatus == Timeout ||
+                  (_lastStatus == ParseError && m.raw.length() <= 1)))
+        _lastStatus = Unsupported;
     return m;
 }
 
