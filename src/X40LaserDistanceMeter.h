@@ -4,6 +4,11 @@
 #define X40_LASER_ON  1
 #define X40_LASER_OFF 0
 
+// Optional plausibility limit: readings above setMaxRange() are reported as
+// OutOfRange (ok=false). Off by default (0) - the module is rated for 40 m.
+// In CatFind ~33.5 m was once seen without a target; cause not confirmed.
+#define X40_DEFAULT_MAX_RANGE_M 0.0f
+
 struct X40Measurement {
     bool ok;
     float meters;
@@ -28,18 +33,22 @@ public:
         ParseError,
         DeviceError,
         UnexpectedResponse,
-        Unsupported
+        Unsupported,
+        OutOfRange      // reading above setMaxRange() (only if a limit is set)
     };
 
     explicit X40LaserDistanceMeter(HardwareSerial* serial);
 
     // begin() with optional RX/TX pins (ESP32 / HardwareSerial with pin selection)
     void begin(uint32_t baudRate = 19200);
+#if defined(ESP32)
     void begin(uint32_t baudRate, int rxPin, int txPin);
+#endif
 
     // Timing configuration
-    void setTimeout(uint32_t ms);   // default 4000 ms
-    void setIdleGap(uint32_t ms);   // default 40 ms after last byte
+    void setTimeout(uint32_t ms);   // default 4000 ms (one measurement takes ~1 s)
+    void setIdleGap(uint32_t ms);   // default 60 ms after last byte
+    void setMaxRange(float meters); // default 0 = no check
 
     // --- SEN0366-compatible measurement API ---
     bool singleMeasurement(float& distance);        // sends 'D', returns meters
@@ -83,6 +92,7 @@ private:
     HardwareSerial* _serial;
     uint32_t _timeout;
     uint32_t _idleGap;
+    float _maxRangeM;
     Status _lastStatus;
     int _lastErrorCode;
     String _lastRaw;
@@ -92,6 +102,8 @@ private:
     void flushInput();
     String sendCommand(char cmd);
     String readResponse();
+    String readMeasurementResponse();
+    X40Measurement runMeasurement(char cmd);
     X40Measurement parseDistance(const String& raw);
     bool parseOK(const String& raw);
 };

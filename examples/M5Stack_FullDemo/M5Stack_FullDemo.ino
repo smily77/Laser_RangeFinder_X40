@@ -495,6 +495,7 @@ String statusName(X40LaserDistanceMeter::Status s) {
         case X40LaserDistanceMeter::DeviceError:        return "DeviceError";
         case X40LaserDistanceMeter::UnexpectedResponse: return "Unexpected";
         case X40LaserDistanceMeter::Unsupported:        return "Unsupported";
-        default:                                        return "Unknown";
+        case X40LaserDistanceMeter::OutOfRange:         return "NoTarget";
+        default:                                       return "Unknown";
     }
 }
